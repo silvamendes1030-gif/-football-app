@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="pt-PT">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Probabilidades de jogo</title>
+<style>
+:root{--bg:#eef2ec;--card:#fff;--ink:#12261b;--mut:#5c6f63;--line:#d3ddd1;--h:#1f6b3a;--a:#2a5db0;--d:#9aa79e;--w:#1f6b3a;--l:#c0392b;--e:#d9a400}
+@media (prefers-color-scheme:dark){:root{--bg:#0e1a13;--card:#16271d;--ink:#e8f0ea;--mut:#9bb0a2;--line:#2a3f31;--h:#4fbf7a;--a:#6c9bff;--d:#6d7f73;--w:#4fbf7a;--l:#ef6b5b;--e:#f0c040}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:500 15px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+main{max-width:640px;margin:0 auto;padding:16px 14px 40px}
+h1{font-size:28px;margin:6px 0 4px}h2{font-size:18px;margin:0 0 10px}
+.sub{color:var(--mut);margin:0 0 16px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:12px}
+select{width:100%;padding:11px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--ink);font:600 16px inherit;margin-bottom:10px}
+select:disabled{opacity:.5}
+#srv input{width:100%;padding:11px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--ink);font:500 15px inherit;margin-bottom:8px}
+#srv button{width:100%;padding:12px;border:0;border-radius:8px;background:var(--h);color:#fff;font:700 16px inherit;cursor:pointer}
+.bar{display:flex;height:34px;border-radius:6px;overflow:hidden;font-weight:700;color:#fff;text-align:center;line-height:34px}
+.bar div{min-width:0;overflow:hidden;white-space:nowrap}
+.legend{display:flex;justify-content:space-between;font-size:13px;color:var(--mut);margin-top:6px}
+.row{display:grid;grid-template-columns:90px 1fr 48px;gap:8px;align-items:center;margin:7px 0}
+.track{height:10px;background:var(--bg);border-radius:5px;overflow:hidden}.fill{height:100%;background:var(--h)}
+.row span:last-child{text-align:right;font-weight:600}
+.big{display:flex;gap:10px}.big div{flex:1;background:var(--bg);border-radius:8px;padding:10px;text-align:center}
+.big strong{display:block;font-size:26px}.big small{color:var(--mut)}
+.vs{font-size:22px;font-weight:700;margin:0 0 2px}.when{color:var(--mut);margin:0 0 12px}
+.form{display:flex;align-items:center;gap:6px;margin:8px 0;flex-wrap:wrap}.form .n{flex:1 1 100%;font-weight:600}
+.f{width:28px;height:28px;border-radius:6px;color:#fff;font-weight:700;text-align:center;line-height:28px}
+.f.V{background:var(--w)}.f.E{background:var(--e)}.f.D{background:var(--l)}
+.sc{display:flex;gap:8px;flex-wrap:wrap}.sc div{background:var(--bg);border-radius:6px;padding:6px 10px;font-weight:600}
+.note{font-size:13px;color:var(--mut)}.err{color:var(--l);font-weight:600}
+#out{display:none}
+</style>
+</head>
+<body>
+<main>
+<h1>Probabilidades de jogo</h1>
+<p class="sub">Escolhe o país, a liga e o time: o app procura o próximo adversário no calendário real.</p>
+<div class="card">
+  <select id="cn" aria-label="País"><option>A carregar países…</option></select>
+  <select id="lg" aria-label="Liga" disabled></select>
+  <select id="tm" aria-label="Time" disabled></select>
+  <p class="note" id="msg"></p>
+  <div id="srv" style="display:none">
+    <input id="srvUrl" type="url" placeholder="https://football-app-xxxx.onrender.com" aria-label="Endereço do servidor">
+    <button id="srvGo" type="button">Ligar ao servidor</button>
+  </div>
+</div>
+
+<div id="out">
+  <div class="card"><p class="vs" id="vs"></p><p class="when" id="wh"></p>
+    <div class="bar" id="bar"></div>
+    <div class="legend"><span id="lh"></span><span>Empate</span><span id="la"></span></div>
+    <p id="fav" style="font-weight:600;margin-top:10px"></p></div>
+  <div class="card"><h2>Gols na partida</h2>
+    <div class="big"><div><strong id="eg"></strong><small>gols esperados</small></div></div>
+    <div id="ov" style="margin-top:8px"></div></div>
+  <div class="card"><h2>Ambas as equipas marcam?</h2><div id="bt"></div></div>
+  <div class="card"><h2>Placares mais prováveis</h2><div class="sc" id="sc"></div></div>
+  <div class="card"><h2>Escanteios</h2><div id="cornersBox"></div></div>
+  <div class="card"><h2>Últimos 5 jogos</h2><div id="fm"></div></div>
+  <p class="note">Probabilidades de vitória fornecidas pela API-Football. Gols, ambas marcam e placares são calculados a partir delas (modelo de Poisson). São estimativas, não garantias.</p>
+</div>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+const pct = (x) => (x * 100).toFixed(0) + '%';
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+let BASE = '';
+async function api(path) {
+  let r;
+  try {
+    r = await fetch(BASE + path);
+  } catch (e) {
+    throw new Error('Sem ligação ao servidor. Abre o app pelo endereço do servidor (Render ou localhost:3000) ou cola esse endereço abaixo.');
+  }
+  let j;
+  try { j = await r.json(); } catch (e) { throw new Error('Resposta inválida do servidor. Confirma o endereço.'); }
+  if (!r.ok) throw new Error(j.error || 'Erro');
+  return j;
+}
+function setMsg(t, err) { $('msg').className = err ? 'err' : 'note'; $('msg').textContent = t || ''; }
+function opts(sel, items, label) {
+  sel.innerHTML = '<option value="">' + label + '</option>' + items.map((i) => `<option value="${esc(i.value)}">${esc(i.label)}</option>`).join('');
+  sel.disabled = !items.length;
+}
+
+/* ---- modelo (Poisson) ---- */
+const pois = (l, k) => { let p = Math.exp(-l); for (let i = 1; i <= k; i++) p *= l / i; return p; };
+const over = (l, line) => { let c = 0; for (let k = 0; k <= Math.floor(line); k++) c += pois(l, k); return 1 - c; };
+function res(lh, la) {
+  let H = 0, D = 0, A = 0, B = 0, sc = [];
+  for (let i = 0; i <= 9; i++) for (let j = 0; j <= 9; j++) {
+    const p = pois(lh, i) * pois(la, j);
+    i > j ? H += p : i < j ? A += p : D += p;
+    if (i && j) B += p;
+    sc.push([i + ' x ' + j, p]);
+  }
+  const t = H + D + A;
+  return { H: H / t, D: D / t, A: A / t, B: B / t, sc: sc.map((s) => [s[0], s[1] / t]) };
+}
+function fit(t) {
+  let best = [1.4, 1.1], be = 9;
+  for (let a = .1; a <= 4; a += .1) for (let b = .1; b <= 3.5; b += .1) {
+    const r = res(a, b);
+    const e = (r.H - t[0]) ** 2 + (r.D - t[1]) ** 2 + (r.A - t[2]) ** 2 + .0004 * (a + b - 2.7) ** 2;
+    if (e < be) { be = e; best = [a, b]; }
+  }
+  return best;
+}
+function rows(el, items) {
+  el.innerHTML = items.map(([t, p]) => `<div class="row"><span>${t}</span><span class="track"><div class="fill" style="width:${p * 100}%"></div></span><span>${pct(p)}</span></div>`).join('');
+}
+
+/* ---- seleção país > liga > time ---- */
+async function loadCountries() {
+  opts($('cn'), [], 'A carregar países…');
+  try {
+    const c = await api('/api/countries');
+    opts($('cn'), c.map((x) => ({ value: x.name, label: x.name })), 'Escolhe o país');
+    $('srv').style.display = 'none'; setMsg('');
+  } catch (e) {
+    opts($('cn'), [], 'Sem ligação');
+    $('srv').style.display = 'block'; setMsg(e.message, true);
+  }
+}
+$('srvGo').onclick = () => {
+  const v = $('srvUrl').value.trim().replace(/\/+$/, '');
+  if (!/^https?:\/\//i.test(v)) return setMsg('O endereço tem de começar por https://', true);
+  BASE = v; loadCountries();
+};
+loadCountries();
+
+$('cn').onchange = async () => {
+  $('out').style.display = 'none';
+  opts($('tm'), [], 'Time'); setMsg('');
+  if (!$('cn').value) return opts($('lg'), [], 'Liga');
+  setMsg('A carregar ligas…');
+  try {
+    const l = await api('/api/leagues?country=' + encodeURIComponent($('cn').value));
+    opts($('lg'), l.map((x) => ({ value: x.id, label: x.name })), 'Escolhe a liga');
+    setMsg(l.length ? '' : 'Sem ligas disponíveis para este país na tua conta da API.');
+  } catch (e) { setMsg(e.message, true); }
+};
+
+$('lg').onchange = async () => {
+  $('out').style.display = 'none';
+  if (!$('lg').value) return opts($('tm'), [], 'Time');
+  setMsg('A carregar times…');
+  try {
+    const t = await api('/api/teams?league=' + $('lg').value);
+    opts($('tm'), t.map((x) => ({ value: x.id, label: x.name })), 'Escolhe o time');
+    setMsg(t.length ? '' : 'Sem times disponíveis nesta liga.');
+  } catch (e) { setMsg(e.message, true); }
+};
+
+$('tm').onchange = async () => {
+  $('out').style.display = 'none';
+  if (!$('tm').value) return;
+  setMsg('A procurar o próximo jogo…');
+  try {
+    const n = await api('/api/next?team=' + $('tm').value);
+    if (!n) return setMsg('Não há próximo jogo agendado para este time.');
+    setMsg('A analisar o jogo…');
+    const m = await api('/api/match/' + n.id);
+    render(n, m);
+    setMsg('');
+  } catch (e) { setMsg(e.message, true); }
+};
+
+function render(n, m) {
+  const pc = m.percent;
+  const t = [pc.home, pc.draw, pc.away].map((x) => (x == null ? null : x / 100));
+  if (t.some((x) => x == null)) { t[0] = .4; t[1] = .27; t[2] = .33; }
+  const [lh, la] = fit(t), r = res(lh, la), T = lh + la;
+  $('out').style.display = 'block';
+  $('vs').textContent = n.home.name + ' x ' + n.away.name;
+  $('wh').textContent = new Date(n.date).toLocaleString('pt-PT', { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' }) + ' · ' + n.competition;
+  $('bar').innerHTML = `<div style="width:${t[0] * 100}%;background:var(--h)">${pct(t[0])}</div><div style="width:${t[1] * 100}%;background:var(--d)">${pct(t[1])}</div><div style="width:${t[2] * 100}%;background:var(--a)">${pct(t[2])}</div>`;
+  $('lh').textContent = n.home.name; $('la').textContent = n.away.name;
+  const mx = Math.max(...t);
+  $('fav').textContent = mx === t[1] ? 'Empate é o resultado mais provável.' : 'Favorito: ' + (mx === t[0] ? n.home.name : n.away.name) + ' (' + pct(mx) + ' de vencer).';
+  $('eg').textContent = T.toFixed(1);
+  rows($('ov'), [0.5, 1.5, 2.5, 3.5, 4.5].map((l) => ['Mais de ' + l, over(T, l)]));
+  rows($('bt'), [['Sim', r.B], ['Não', 1 - r.B]]);
+  $('sc').innerHTML = r.sc.sort((a, b) => b[1] - a[1]).slice(0, 6).map((s) => `<div>${s[0]} · ${pct(s[1])}</div>`).join('');
+  if (m.corners) {
+    const C = m.corners.average;
+    $('cornersBox').innerHTML = `<div class="big"><div><strong>${C.toFixed(1)}</strong><small>escanteios esperados (média dos últimos jogos)</small></div></div><div id="oc" style="margin-top:8px"></div>`;
+    rows($('oc'), [8.5, 9.5, 10.5, 11.5].map((l) => ['Mais de ' + l, over(C, l)]));
+  } else {
+    $('cornersBox').innerHTML = '<p class="note">Sem estatísticas de escanteios disponíveis para estes times.</p>';
+  }
+  const fm = (tm) => `<div class="form"><span class="n">${esc(tm.name)}</span>${tm.last5.map((g) => `<span class="f ${g.result}" title="${esc(g.opponent)} ${g.gf}-${g.ga}">${g.result}</span>`).join('')}</div>`;
+  $('fm').innerHTML = fm(m.home) + fm(m.away);
+}
+</script>
+</body>
+</html>
